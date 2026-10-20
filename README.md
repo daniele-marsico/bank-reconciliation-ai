@@ -4,6 +4,20 @@ Matches bank statement lines to open invoices automatically. Simple, auditable r
 
 > All names, invoices and amounts in this repository are **synthetic**.
 
+📘 **[Guida in italiano: come replicarlo da un cliente](COME_REPLICARE.md)**
+
+## The result
+
+![Preview of the Excel report](docs/report-preview.svg)
+
+What the reader gets, in three numbers (sample data, one month of bank statement):
+
+| Matched automatically | Bank fees found | Left to review |
+|---:|---:|---:|
+| **24 of 27** lines | **€ 35.00** | **3** lines |
+
+The three lines left are exactly the ones that need a human: an unknown payer, the account fee and stamp duty.
+
 ## How it works
 
 | Pass | Rule | Typical case |
@@ -38,12 +52,15 @@ The result is an Excel file in `output/` with three sheets:
 
 ## Using it with real data
 
-| File | Columns |
-|---|---|
-| `data/bank_statement.csv` | `Line`, `Booking Date`, `Description`, `Amount` |
-| `data/open_items.csv` | `Document No.`, `Type`, `Counterparty`, `Due Date`, `Amount` |
+| File | Source | Columns used |
+|---|---|---|
+| `data/bank_statement.xlsx` / `.csv` | Home-banking export | Booking Date, Description, Amount (or separate money-in / money-out columns) |
+| `data/open_items.xlsx` / `.csv` | ERP customer + vendor ledger entries, open only | Document No., Customer/Vendor Name, Due Date, Remaining Amount |
 
-The bank file can come from a CSV / CAMT.053 export of the home-banking; open items from the customer and vendor ledger entries of the ERP (e.g. Business Central).
+- Excel or CSV, comma or semicolon separated, amounts as `1234.56` or `1.234,56`, dates as `30/09/2026` or `2026-09-30`
+- Column names in English or Italian (e.g. *Data contabile*, *Entrate/Uscite*, *Nr. documento*, *Importo residuo*)
+
+Step-by-step instructions, data requests and the checks to run before delivering are in the **[Italian guide](COME_REPLICARE.md)**.
 
 ## Possible extensions
 
