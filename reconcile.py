@@ -28,6 +28,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from io_utils import find_file, read_any, standardise, to_date, to_number
+
 BASE = Path(__file__).parent
 DATA_DIR = BASE / "data"
 OUTPUT_DIR = BASE / "output"
@@ -62,6 +64,52 @@ class State:
     def open_items(self) -> pd.DataFrame:
         done = {d for m in self.matches if m.rule != "AI suggestion" for d in m.documents}
         return self.items[~self.items["Document No."].isin(done)]
+
+
+# ----------------------------------------------------------------- data ----
+# Column names accepted for each field (home-banking and Business Central, EN and IT)
+BANK_ALIASES = {
+    "Booking Date": ["Data contabile", "Data operazione", "Data", "Date"],
+    "Description": ["Descrizione", "Causale", "Descrizione operazione", "Dettagli"],
+    "Amount": ["Importo"],
+    "Credit": ["Entrate", "Avere", "Accrediti"],
+    "Debit": ["Uscite", "Dare", "Addebiti"],
+}
+ITEM_ALIASES = {
+    "Document No.": ["Nr. documento", "N. documento", "Numero documento"],
+    "Counterparty": ["Customer Name", "Vendor Name", "Nome cliente", "Nome fornitore", "Nome", "Ragione sociale"],
+    "Due Date": ["Data scadenza", "Scadenza"],
+    "Amount": ["Remaining Amount", "Importo residuo", "Importo"],
+    "Type": ["Tipo documento", "Document Type"],
+}
+
+
+def load_data() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Bank statement and open items from data/ (CSV or Excel, EN or IT columns)."""
+    bank = standardise(read_any(find_file(DATA_DIR, "bank_statement")), BANK_ALIASES,
+                       ["Booking Date", "Description"])
+    if "Amount" not in bank.columns:  # separate in / out columns, as many banks export
+        if not {"Credit", "Debit"} <= set(bank.columns):
+            raise ValueError("Bank file needs an Amount column, or two columns for money in and out")
+        bank["Amount"] = to_number(bank["Credit"]).fillna(0) - to_number(bank["Debit"]).fillna(0).abs()
+    bank["Amount"] = to_number(bank["Amount"]).round(2)
+    bank["Booking Date"] = to_date(bank["Booking Date"]).dt.date
+    bank["Description"] = bank["Description"].fillna("").astype(str)
+    bank = bank.dropna(subset=["Amount"])
+    if "Line" not in bank.columns:
+        bank.insert(0, "Line", range(1, len(bank) + 1))
+    bank["Line"] = bank["Line"].astype(int)
+    bank = bank[["Line", "Booking Date", "Description", "Amount"]]
+
+    items = standardise(read_any(find_file(DATA_DIR, "open_items")), ITEM_ALIASES,
+                        ["Document No.", "Counterparty", "Due Date", "Amount"])
+    items["Amount"] = to_number(items["Amount"]).round(2)
+    items["Due Date"] = to_date(items["Due Date"]).dt.date
+    items["Document No."] = items["Document No."].astype(str).str.strip()
+    if "Type" not in items.columns:
+        items["Type"] = items["Amount"].map(lambda v: "Customer invoice" if v >= 0 else "Vendor invoice")
+    items = items[["Document No.", "Type", "Counterparty", "Due Date", "Amount"]]
+    return bank.reset_index(drop=True), items.dropna(subset=["Amount"]).reset_index(drop=True)
 
 
 # -------------------------------------------------------------- helpers ----
@@ -251,12 +299,11 @@ def main() -> None:
     parser.add_argument("--model", default=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5"))
     args = parser.parse_args()
 
-    if not (DATA_DIR / "bank_statement.csv").exists():
+    if not any(DATA_DIR.glob("bank_statement.*")):
         import generate_sample_data
         generate_sample_data.main()
 
-    bank = pd.read_csv(DATA_DIR / "bank_statement.csv")
-    items = pd.read_csv(DATA_DIR / "open_items.csv")
+    bank, items = load_data()
     s = State(bank, items)
 
     pass_reference(s, args.fee_tolerance)
